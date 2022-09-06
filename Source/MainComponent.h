@@ -96,12 +96,16 @@ private:
     void buttonClicked(juce::Button* button) override;
     void setJIFrequencies();
 
+    bool changingJIInterval = false;
+
     // KeyListener functions
     bool keyPressed(const juce::KeyPress& key, Component* originatingComponent) override;
 
     //==========================================================================
     juce::MidiKeyboardState keyboardState;
     SynthAudioSource synthAudioSource;
+
+    juce::MidiMessageCollector midiCollector;
 
     juce::ComboBox midiInputList;
     juce::Label midiInputListLabel;
@@ -117,6 +121,8 @@ private:
     int melNum;
     int melDen;
     double rootFreq = juce::MidiMessage::getMidiNoteInHertz(48);
+
+    std::vector<std::vector<int>> JIIntervals;
 
     juce::TextButton melNumButton;
     juce::TextButton melDenButton;

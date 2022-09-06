@@ -19,6 +19,7 @@ void SineWaveVoice::startNote(int midiNoteNumber, float velocity,
     level = velocity;
     tailOff = 0.0;
 
+    // this is where the magic equation happens
     auto cyclesPerSecond = ((midiNoteNumber % 16) * melFreq) + ((7 - (midiNoteNumber / 16)) * bassFreq);
     auto cyclesPerSample = cyclesPerSecond / getSampleRate();
 
@@ -114,7 +115,8 @@ void SynthAudioSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& buf
     bufferToFill.clearActiveBufferRegion();
 
     juce::MidiBuffer incomingMidi;
-    midiCollector.removeNextBlockOfMessages(incomingMidi, bufferToFill.numSamples); 
+    midiCollector.removeNextBlockOfMessages(incomingMidi, bufferToFill.numSamples);
+
 
     keyboardState.processNextMidiBuffer(incomingMidi, bufferToFill.startSample,
         bufferToFill.numSamples, true);
@@ -137,6 +139,8 @@ MainComponent::MainComponent() :
     bassDen = 1;
     melNum = 3;
     melDen = 2;
+
+    JIIntervals = { {1,1},{9,8},{6,5},{5,4},{4,3},{3,2},{8,5},{5,3} };
 
     jiNumberTarget = &melNum;
     setJIFrequencies();
@@ -237,19 +241,48 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
     // but be careful - it will be called on the audio thread, not the GUI thread.
 
     // For more details, see the help for AudioProcessor::prepareToPlay()
-
+    midiCollector.reset(sampleRate);
     synthAudioSource.prepareToPlay(samplesPerBlockExpected, sampleRate);
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
-    // Your audio-processing code goes here!
+    /*    // manipulate MIDI here
+    juce::MidiBuffer incomingMidi;
+    midiCollector.removeNextBlockOfMessages(incomingMidi, bufferToFill.numSamples);
+    //auto newMidi = incomingMidi.begin();
+    //auto newMidiMessage = (*newMidi).getMessage();
+    //DBG(newMidiMessage.getDescription());
+    //DBG(std::to_string(incomingMidi.isEmpty()));
+    for (auto mid = incomingMidi.begin(); mid != incomingMidi.end(); mid++) {
+        DBG("In LOOP");
+        auto newMessage = (*mid).getMessage();
+        // DBG(juce::String(newMessage.getDescription()));
+        if (newMessage.getNoteNumber() == 112) {
+            if (newMessage.isNoteOn()) changingJIInterval = true;
+            else changingJIInterval = false;
+            logMessage(juce::String("changingJIInterval = " + std::to_string(changingJIInterval)));
+        }
+        else if (changingJIInterval) {
+            // calculate and change JI values
 
-    // For more details, see the help for AudioProcessor::getNextAudioBlock()
+                ///((midiNoteNumber % 16) * melFreq) 
+                ///((7 - (midiNoteNumber / 16)) * bassFreq);
+            
 
-    // Right now we are not producing any data, in which case we need to clear the buffer
-    // (to prevent the output of random noise)
-    //bufferToFill.clearActiveBufferRegion();
+            bassNum = JIIntervals[(7 - (newMessage.getNoteNumber()) / 16)][0];
+            bassDen = JIIntervals[(7 - (newMessage.getNoteNumber()) / 16)][1];
+            melNum = JIIntervals[newMessage.getNoteNumber() % 16][0];
+            melDen = JIIntervals[newMessage.getNoteNumber() % 16][1];
+
+            setJIFrequencies();
+
+        }
+
+    }
+    */
+
+
     synthAudioSource.getNextAudioBlock(bufferToFill);
 }
 
@@ -328,16 +361,28 @@ void MainComponent::setMidiInput(int index)
 }
 
 void MainComponent::handleNoteOn(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) {
+    if (midiNoteNumber == 112) changingJIInterval = true;
+    else if (changingJIInterval) {
+        bassNum = JIIntervals[7 - (midiNoteNumber / 16)][0];
+        bassDen = JIIntervals[7 - (midiNoteNumber / 16)][1];
+        melNum = JIIntervals[midiNoteNumber % 8][0];
+        melDen = JIIntervals[midiNoteNumber % 8][1];
+        setJIFrequencies();
+    }
+
     juce::MessageManager::callAsync([=]() {
         int i = 7 - (midiNoteNumber / 16);
         int j = midiNoteNumber % 16;
         buttonGrid[i][j].setColours(juce::Colours::green, juce::Colours::yellowgreen, juce::Colours::red);
         buttonGrid[i][j].repaint();
         logMessage(juce::String("Note On [") + juce::String(i) + juce::String(", ") + juce::String(j) + juce::String("]"));
+        logMessage(juce::String(midiNoteNumber));
     });
 };
 
 void MainComponent::handleNoteOff(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity) {
+    if (midiNoteNumber == 112) changingJIInterval = false;
+
     juce::MessageManager::callAsync([=]() {
         int i = 7 - (midiNoteNumber / 16); 
         int j = midiNoteNumber % 16;
@@ -476,15 +521,15 @@ void MainComponent::buttonClicked(juce::Button* button) {
 void MainComponent::setJIFrequencies() {
     bassFreq = rootFreq * bassNum / bassDen;
     melFreq = bassFreq * melNum / melDen;
+    juce::MessageManager::callAsync([=]() {
+        melNumButton.setButtonText(juce::String(melNum));
 
-    melNumButton.setButtonText(juce::String(melNum));
+        melDenButton.setButtonText(juce::String(melDen));
 
-    melDenButton.setButtonText(juce::String(melDen));
+        bassNumButton.setButtonText(juce::String(bassNum));
 
-    bassNumButton.setButtonText(juce::String(bassNum));
-
-    bassDenButton.setButtonText(juce::String(bassDen));
-
+        bassDenButton.setButtonText(juce::String(bassDen));
+        });
 }
 
 void MainComponent::logMessage(const juce::String& m) {
